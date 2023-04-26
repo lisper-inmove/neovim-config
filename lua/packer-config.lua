@@ -85,4 +85,14 @@ return require('packer').startup(function(use)
 
   use { 'TimUntersberger/neogit', requires = 'nvim-lua/plenary.nvim' }
 
+  use {
+     'goolord/alpha-nvim',
+     requires = { 'nvim-tree/nvim-web-devicons' },
+     config = function ()
+        require'alpha'.setup(require'alpha.themes.startify'.config)
+     end
+  }
+
+  use 'mhinz/vim-startify'
+
 end)
