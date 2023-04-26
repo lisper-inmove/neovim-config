@@ -8,6 +8,7 @@ require('hardline-config')
 require('which-key-config')
 require('telescope-project-config')
 require('treesitter-config')
+require('neogit-config')
 
 require('rust')
 require('python')

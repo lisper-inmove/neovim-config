@@ -66,7 +66,7 @@ return require('packer').startup(function(use)
         end,
       },
       {'williamboman/mason-lspconfig.nvim'}, -- Optional
-  
+
       -- Autocompletion
       {'hrsh7th/nvim-cmp'},     -- Required
       {'hrsh7th/cmp-nvim-lsp'}, -- Required
@@ -82,5 +82,7 @@ return require('packer').startup(function(use)
         'stevearc/dressing.nvim', -- optional for vim.ui.select
     },
   }
+
+  use { 'TimUntersberger/neogit', requires = 'nvim-lua/plenary.nvim' }
 
 end)
