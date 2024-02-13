@@ -150,6 +150,14 @@ local plugins = {
     config = function ()
       return require "custom.configs.toggleterm"
     end
+  },
+  {
+    'voldikss/vim-floaterm',
+    lazy = false,
+    config = function ()
+      vim.g.floaterm_height = 0.9
+      vim.g.floaterm_width = 0.9
+    end
   }
 }
 

@@ -1,7 +1,8 @@
 require("toggleterm").setup({
-    open_mapping = [[<c-\>]],
-    start_in_insert = true,
-    direction = 'horizontal'
+  open_mapping = [[<c-\>]],
+  start_in_insert = true,
+  direction = 'horizontal',
+  name = "run"
 })
 
 function _G.set_terminal_keymaps()

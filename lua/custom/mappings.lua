@@ -50,18 +50,18 @@ M.crates = {
   }
 }
 
-M.toggleterm = {
-  n = {
-    ["<leader>tt"] = {
-      "<cmd> ToggleTerm direction=float <CR>",
-      "toggle term"
-    },
-
-    ["<leader>tu"] = {
-      "<cmd> ToggleTerm direction=horizontal <CR>",
-      "toggle term"
-    }
-  }
-}
+-- M.toggleterm = {
+--   n = {
+--     ["<leader>tt"] = {
+--       "<cmd> ToggleTerm direction=float <CR>",
+--       "toggle term"
+--     },
+-- 
+--     ["<leader>tu"] = {
+--       "<cmd> ToggleTerm direction=horizontal <CR>",
+--       "toggle term"
+--     }
+--   }
+-- }
 
 return M

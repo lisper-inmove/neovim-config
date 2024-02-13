@@ -31,6 +31,7 @@ vim.g.mapleader = "t"
 vim.api.nvim_set_keymap("n", "<leader>f", ":Telescope find_files<CR>", { silent = true })
 vim.api.nvim_set_keymap("n", "<leader>g", ":Telescope live_grep<CR>", { silent = true })
 vim.api.nvim_set_keymap("n", "<leader>p", ":Telescope neovim-project discover<CR>", { silent = true })
+vim.api.nvim_set_keymap("n", "<leader>tt", ":FloatermToggle<CR>", { silent = true })
 vim.api.nvim_set_keymap("n", "<C-j>", "<C-W>j", {})
 vim.api.nvim_set_keymap("n", "<C-k>", "<C-W>k", {})
 vim.api.nvim_set_keymap("n", "<C-l>", "<C-W>l", {})
