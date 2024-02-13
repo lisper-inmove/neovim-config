@@ -33,7 +33,7 @@ local options = {
   renderer = {
     root_folder_label = false,
     highlight_git = false,
-    highlight_opened_files = "all",
+    highlight_opened_files = "none",
 
     indent_markers = {
       enable = false,
