@@ -26,10 +26,13 @@ vim.opt.isfname:append("@-@")
 
 vim.opt.updatetime = 50
 vim.opt.colorcolumn = "120"
+vim.o.cursorline = true
+vim.o.cursorcolumn = true
+vim.api.nvim_set_hl(0, 'CursorLine', { fg = '#808080' })
 
 vim.g.mapleader = "t"
 vim.api.nvim_set_keymap("n", "<leader>f", ":Telescope find_files<CR>", { silent = true })
-vim.api.nvim_set_keymap("n", "<leader>g", ":Telescope live_grep<CR>", { silent = true })
+vim.api.nvim_set_keymap("n", "<leader>a", ":Telescope live_grep<CR>", { silent = true })
 vim.api.nvim_set_keymap("n", "<leader>p", ":Telescope neovim-project discover<CR>", { silent = true })
 vim.api.nvim_set_keymap("n", "<leader>tt", ":FloatermToggle<CR>", { silent = true })
 vim.api.nvim_set_keymap("n", "<C-j>", "<C-W>j", {})
