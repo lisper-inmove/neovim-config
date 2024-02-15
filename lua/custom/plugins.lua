@@ -19,6 +19,7 @@ local plugins = {
       ensure_installed = {
         "typescript-language-server",
         "tailwindcss-language-server",
+        "cssmodules-language-server",
         "eslint-lsp",
         "prettierd",
         "rust-analyzer",
@@ -160,7 +161,7 @@ local plugins = {
       -- Set the FloatermBorder highlight
       vim.api.nvim_set_hl(0, 'FloatermBorder', { fg = '#FFA500' })
     end
-  }
+  },
 }
 
 return plugins
