@@ -152,16 +152,6 @@ local plugins = {
       return require "custom.configs.toggleterm"
     end
   },
-  {
-    'voldikss/vim-floaterm',
-    lazy = false,
-    config = function ()
-      vim.g.floaterm_height = 0.9
-      vim.g.floaterm_width = 0.9
-      -- Set the FloatermBorder highlight
-      vim.api.nvim_set_hl(0, 'FloatermBorder', { fg = '#FFA500' })
-    end
-  },
 }
 
 return plugins
