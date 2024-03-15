@@ -68,6 +68,7 @@ local default_plugins = {
   },
 
   {
+    -- TSInstall prisma
     "nvim-treesitter/nvim-treesitter",
     event = { "BufReadPost", "BufNewFile" },
     tag = "v0.9.2",
@@ -242,6 +243,7 @@ local default_plugins = {
       require("which-key").setup(opts)
     end,
   },
+
 }
 
 local config = require("core.utils").load_config()
