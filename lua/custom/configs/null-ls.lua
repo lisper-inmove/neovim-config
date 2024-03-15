@@ -3,7 +3,7 @@ local null_ls = require("null-ls")
 local opts = {
   sources = {
     null_ls.builtins.formatting.prettierd.with({
-      filetypes = { "prisma", "javascript", "typescript", "css", "html", "lua", "python", "rust" }, -- 添加你需要的其他文件类型
+      filetypes = { "prisma", "javascript", "typescript", "css", "html", "lua", "python", "rust", "dart", "tsx", "typescriptreact" }, -- 添加你需要的其他文件类型
     }),
   },
   on_attach = function(client, bufnr)
