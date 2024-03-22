@@ -2,7 +2,7 @@ local plugins = {
   {
     "nvimtools/none-ls.nvim",
     event = "VeryLazy",
-    opts = function ()
+    opts = function()
       return require "custom.configs.null-ls"
     end
   },
@@ -34,20 +34,21 @@ local plugins = {
       "typescript",
       "typescriptreact",
     },
-    config = function ()
+    config = function()
       require("nvim-ts-autotag").setup()
     end
   },
   {
     "nvim-treesitter/nvim-treesitter",
-    opts = function ()
+    opts = function()
       opts = require "plugins.configs.treesitter"
       opts.ensure_installed = {
         "lua",
         "javascript",
         "typescript",
         "tsx",
-        "css"
+        "css",
+        "python"
       }
       return opts
     end
@@ -97,7 +98,7 @@ local plugins = {
   {
     "rust-lang/rust.vim",
     ft = "rust",
-    init = function ()
+    init = function()
       vim.g.rustfmt_autosave = 1
     end
   },
@@ -105,10 +106,10 @@ local plugins = {
     "simrat39/rust-tools.nvim",
     ft = "rust",
     dependencies = "neovim/nvim-lspconfig",
-    opts = function ()
+    opts = function()
       return require "custom.configs.rust-tools"
     end,
-    config = function (_, opts)
+    config = function(_, opts)
       require("rust-tools").setup(opts)
     end
   },
@@ -120,8 +121,8 @@ local plugins = {
   },
   {
     "saecki/crates.nvim",
-    ft = {"rust", "toml"},
-    config = function (_, opts)
+    ft = { "rust", "toml" },
+    config = function(_, opts)
       local crates = require("crates")
       crates.setup(opts)
       crates.show()
@@ -129,7 +130,7 @@ local plugins = {
   },
   {
     "hrsh7th/nvim-cmp",
-    opts = function ()
+    opts = function()
       local M = require "plugins.configs.cmp"
       table.insert(M.sources, { name = "crates" })
       return M
@@ -139,8 +140,8 @@ local plugins = {
     'akinsho/flutter-tools.nvim',
     lazy = false,
     dependencies = {
-        'nvim-lua/plenary.nvim',
-        -- 'stevearc/dressing.nvim', -- optional for vim.ui.select
+      'nvim-lua/plenary.nvim',
+      -- 'stevearc/dressing.nvim', -- optional for vim.ui.select
     },
     config = true,
   },
@@ -148,7 +149,7 @@ local plugins = {
     'akinsho/toggleterm.nvim',
     version = "*",
     lazy = false,
-    config = function ()
+    config = function()
       return require "custom.configs.toggleterm"
     end
   },
