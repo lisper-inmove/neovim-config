@@ -1,0 +1,51 @@
+return {
+    "David-Kunz/gen.nvim",
+    dependencies = {
+        "nvim-lua/plenary.nvim",
+    },
+    config = function()
+        local gen = require("gen")
+        
+        -- 基础配置
+        gen.setup({
+            model = "codegemma:7b-instruct",        -- 改为你下载的模型
+            quit_map = "q",            -- 关闭窗口
+            retry_map = "<c-r>",       -- 重新生成
+            accept_map = "<c-cr>",     -- 应用代码（Ctrl+Enter）
+            display_mode = "float",    -- 浮动窗口显示
+            show_model = false,
+        })
+        
+        -- 自定义提示词（可选）
+        gen.prompts["Optimize_Code"] = {
+            prompt = "请优化以下代码，使其更高效、更易读，并简要说明优化点:\n$text",
+            replace = true,
+        }
+        
+        gen.prompts["Explain_Code"] = {
+            prompt = "请详细解释以下代码的功能和工作原理:\n$text",
+            replace = false,
+        }
+
+	gen.prompts["Add_Comments_CPP"] = {
+            prompt = "你是一个C++代码注释专家。请为以下C++代码添加详细的中文注释。\n规则：\n- 只输出纯代码，不要使用```cpp或```标记\n- 不要添加任何额外的解释\n- 保持原有代码结构\n\n代码：\n$text",
+            replace = true,
+        }
+
+	-- 添加一个从注释生成代码的专用提示词
+        gen.prompts["Generate_Code_From_Comment"] = {
+            prompt = "你是一个代码生成专家。请严格根据以下注释/需求，生成对应的代码实现。\n规则：\n1. 只输出代码，不要有任何解释\n2. 不要用```markdown代码块包裹\n3. 保持代码简洁并添加必要注释\n\n注释/需求：\n$text",
+            replace = true,  -- 这个选项非常关键，它会用生成的代码直接替换你选中的注释
+        }
+        
+        -- 快捷键设置
+        vim.keymap.set({"n", "v"}, "<leader>g", ":Gen<CR>", 
+            { noremap = true, silent = true, desc = "打开 AI 提示" })
+        vim.keymap.set("v", "<leader>go", ":Gen Optimize_Code<CR>", 
+            { noremap = true, silent = true, desc = "优化代码" })
+        vim.keymap.set("v", "<leader>ge", ":Gen Explain_Code<CR>", 
+            { noremap = true, silent = true, desc = "解释代码" })
+        vim.keymap.set("v", "<leader>gc", ":Gen Add_Comments<CR>", 
+            { noremap = true, silent = true, desc = "添加注释" })
+    end,
+}

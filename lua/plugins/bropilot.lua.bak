@@ -1,0 +1,25 @@
+-- ~/.config/nvim/lua/plugins/bropilot.lua
+return {
+    "meeehdi-dev/bropilot.nvim",
+    event = "VeryLazy", -- 懒加载，提升启动速度
+    dependencies = {
+        "nvim-lua/plenary.nvim",
+        "j-hui/fidget.nvim",   -- 可选，显示后台任务进度
+    },
+    opts = {
+        auto_suggest = true,   -- 开启自动建议
+        model = "codegemma:7b-instruct", -- 确保你已拉取此模型
+        prompt = {
+            prefix = "<|fim_prefix|>",
+            suffix = "<|fim_suffix|>",
+            middle = "<|fim_middle|>",
+        },
+        -- 建议按键映射，避免与系统或LSP插件冲突
+        keymap = {
+            accept_word = "<C-Right>",   -- Ctrl+Right 接受单词
+            accept_line = "<C-Return>",  -- Ctrl+Enter 接受一行
+            accept_block = "<Tab>",      -- Tab 接受整个建议
+            dismiss = "<C-]>",           -- 拒绝建议
+        },
+    },
+}
