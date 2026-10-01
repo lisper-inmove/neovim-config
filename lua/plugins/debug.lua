@@ -3,10 +3,6 @@ return {
   -- 调试核心
   {
     "mfussenegger/nvim-dap",
-    config = function()
-      local dap = require("dap")
-      -- dap.setup()
-    end,
     keys = {
       { "<leader>dB", function() require("dap").toggle_breakpoint() end, desc = "Toggle Breakpoint" },
       { "<leader>dc", function() require("dap").continue() end, desc = "Continue" },
@@ -28,10 +24,6 @@ return {
       ensure_installed = { "codelldb" },  -- 自动安装 codelldb
       automatic_installation = true,
     },
-    -- Optional: Add config to ensure Mason DAP setup runs after nvim-dap
-    config = function(_, opts)
-      require("mason-nvim-dap").setup(opts)
-    end,
   },
   
   -- 调试 UI 界面
