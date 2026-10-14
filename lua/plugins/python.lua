@@ -36,11 +36,43 @@ return {
       adapters = {
         ["neotest-python"] = {
           runner = "pytest",
-          -- 走 uv：与终端里 `uv run pytest` 行为一致，跑测试前自动 sync 依赖
-          -- （若 nvim 的 PATH 里没有 uv，改成 ".venv/bin/python"）
-          python = { "uv", "run", "python" },
+          -- 直接用 venv 里的解释器，不用 `uv run`。
+          -- 原因：neotest 调试（<leader>td）会把解释器原样塞进 debugpy 的 `python` 字段，
+          -- 而 debugpy 只接受单个解释器路径；`{ "uv", "run", "python" }` 是 3 个元素，
+          -- 会导致 debug 会话卡死（实测：会话建立但永不结束、无结果）。
+          -- 代价：不再自动 sync 依赖，改动依赖后需自己跑一次 `uv sync`。
+          python = ".venv/bin/python",
         },
       },
     },
+  },
+
+  -- debugpy 本体：nvim-dap-python 需要它提供的 debugpy-adapter 可执行文件
+  {
+    "mason-org/mason.nvim",
+    opts = { ensure_installed = { "debugpy" } },
+  },
+
+  -- Python 调试：注册 dap.adapters.python
+  -- <leader>td（neotest 的 dap strategy）和断点调试都依赖它；
+  -- 没有它时按 <leader>td 会报 "No adapter for type 'python'"
+  {
+    "mfussenegger/nvim-dap",
+    optional = true,
+    dependencies = {
+      {
+        "mfussenegger/nvim-dap-python",
+        config = function()
+          require("dap-python").setup("debugpy-adapter")
+        end,
+      },
+    },
+  },
+
+  -- 别让 mason-nvim-dap 自动注册 python 适配器，否则会覆盖上面 dap-python 注册的
+  {
+    "jay-babu/mason-nvim-dap.nvim",
+    optional = true,
+    opts = { handlers = { python = function() end } },
   },
 }

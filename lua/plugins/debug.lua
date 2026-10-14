@@ -93,7 +93,7 @@ return {
         end)
       end
 
-      -- 便捷入口：<leader>dg 从测试列表中选择用例后启动调试
+      -- 便捷入口：<leader>tg 从测试列表中选择用例后启动调试
       local function debug_tests()
         if not ensure_binary() then
           return
@@ -119,7 +119,7 @@ return {
         end)
       end
 
-      -- 供 nvim-dap 配置选择器使用（<leader>dg 走上面的专用入口，
+      -- 供 nvim-dap 配置选择器使用（<leader>tg 走上面的专用入口，
       -- 这里主要给 :lua require("dap").continue() 无会话时的手动选择）
       dap.configurations.cpp = {
         gtest_config("调试 LearnCPP_Test (全部)", {}),
@@ -129,7 +129,8 @@ return {
         end),
       }
 
-      vim.keymap.set("n", "<leader>dg", debug_tests, { desc = "Debug gtest (可选 filter)" })
+      -- 归在 t 组：这是"调试测试"动作，与 <leader>td 调试 pytest 属于同一语义
+      vim.keymap.set("n", "<leader>tg", debug_tests, { desc = "Debug gtest (可选 filter)" })
     end,
     keys = {
       { "<leader>dB", function() require("dap").toggle_breakpoint() end, desc = "Toggle Breakpoint" },

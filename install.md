@@ -104,7 +104,7 @@ REPO_URL=git@github.com:xxx/fork.git NVIM_DIR=~/.config/nvim bash install.sh
 | `<Space>ff` / `<Space>/` | 找文件 / 全文搜索 |
 | `gd` / `K` | 跳定义 / 查文档（clangd） |
 | `<Space>dB` | 打断点 |
-| `<Space>dg` | **选择 gtest 用例调试**（C++ 项目 / LearnCPP） |
+| `<Space>tg` | **选择 gtest 用例调试**（C++ 项目 / LearnCPP） |
 | `<Space>dt` | 开关调试面板 |
 | `<C-n>` | neo-tree 文件树 |
 | `<Space>ac` / `<Space>op` | AI 对话 / 本地模型 |
