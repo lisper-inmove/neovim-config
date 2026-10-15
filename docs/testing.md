@@ -9,8 +9,8 @@
 
 | 目标 | 跑 | 调 | 适配器 |
 |---|---|---|---|
-| Python / pytest | `<Space>tt` 等 | `<Space>td` | debugpy |
-| C++ / gtest | （在 `<Space>tg` 的列表里选"运行全部"） | `<Space>tg` | codelldb |
+| Python / pytest | `<Space>tt` / `<Space>tr` | `<Space>td` | neotest-python + debugpy |
+| C++ / gtest | `<Space>tt` / `<Space>tr`（跑前自动编译） | `<Space>tg`（`<Space>td` 走同一套 codelldb 配置，未实测） | neotest_cpp（自写）+ codelldb |
 
 ---
 
@@ -24,7 +24,7 @@
 | `<Space>tr` | **运行光标所在的那个测试**（最常用） |
 | `<Space>tT` | 运行整个项目（cwd）的测试 |
 | `<Space>tl` | 重跑上一次运行 |
-| `<Space>td` | **调试光标所在 pytest 用例**（debugpy，可打断点、单步） |
+| `<Space>td` | **调试光标所在用例**（Python → debugpy，C++ → codelldb） |
 | `<Space>tg` | **选择并调试 gtest 用例**（C++，见下） |
 | `<Space>ts` | 开关测试摘要面板（列出全部用例与状态） |
 | `<Space>to` | 查看最近一次运行的输出（含失败堆栈） |
@@ -56,10 +56,10 @@
 
 | 项目 | 要求 |
 |---|---|
-| 插件 | `neotest` + `neotest-python`（测试）、`nvim-dap-python` + `debugpy`（调试）、`codelldb`（C++） |
+| 插件 | `neotest` + `neotest-python`、自写 `neotest_cpp`（测试）、`nvim-dap-python` + `debugpy`、`codelldb`（调试） |
 | Python 项目 | 根目录有 `pyproject.toml`；测试文件命名 `test_*.py` 或 `*_test.py`；根目录有 `.venv/`（`uv sync` 生成） |
-| C++ 项目 | 二进制在 `<项目根>/build-Debug/bin/LearnCPP_Test` |
-| treesitter | 需要 python parser |
+| C++ 项目 | 二进制在 `<项目根>/build-Debug/bin/LearnCPP_Test`；项目根 = 有 `compile_commands.json` 或 `CMakeLists.txt` 的目录 |
+| treesitter | 需要 python parser 和 cpp parser（用例靠 tree-sitter 解析） |
 
 `lazyvim.plugins.extras.test.core` 只提供 neotest 骨架和 `<Space>t*` 键位，
 **`adapters` 默认为空**——真正让测试跑起来的语言适配器必须自己配。
@@ -105,7 +105,25 @@ python 适配器，从而覆盖 `nvim-dap-python` 注册的那个。`python.lua`
 ⚠️ 因此 neotest 的 `python` 配置项必须是**单个解释器路径**，不能用
 `{ "uv", "run", "python" }`，否则调试会话会静默卡死。详见常见问题。
 
-### C++ / gtest（`<Space>tg`）
+### C++ / gtest —— 运行（`<Space>tr` / `<Space>tt`）
+
+**运行**由 neotest + 自写的 `neotest_cpp` 适配器驱动（`lua/neotest_cpp.lua`）：
+
+1. **发现用例**：tree-sitter-cpp 解析文件里的 `TEST_F(Suite, Name)`，
+   用例名取 gtest 全名（`Tester.OpenCV_Edge_Detect`），和 `<Space>tg`
+   列表、`--gtest_list_tests` 里看到的一致。
+2. **运行**：先增量 `cmake --build build-Debug --target LearnCPP_Test`，
+   再跑 `<二进制> --gtest_filter=<光标所在用例>`。编译输出和测试输出都在
+   `<Space>to` 里——编译不过时你看到的是编译错误，而不是旧二进制在跑。
+3. **解析**：读 gtest 的 `[ OK ]` / `[ FAILED ]` 行回填状态与失败信息。
+
+⚠️ **OpenCV 用例会开图像窗口并阻塞**：用例里有 `cv::imshow` + `waitKey(0)`，
+要在窗口里按任意键，测试才结束、neotest 才出结果。
+
+⚠️ 此前只有一个 `neotest-python` 适配器，它对 `.cc` 文件直接返回 false，
+所以 `<Space>tr` 在 C++ 文件里**任何行**都是 "No tests found"（与行号无关）。
+
+### C++ / gtest —— 调试（`<Space>tg`）
 
 1. **先构建**，否则会提示找不到二进制：
    ```bash
@@ -133,6 +151,8 @@ python 适配器，从而覆盖 `nvim-dap-python` 注册的那个。`python.lua`
 |---|---|
 | `lazyvim.json` | 启用 `lazyvim.plugins.extras.test.core` |
 | `lua/plugins/python.lua` | neotest-python adapter、`nvim-dap-python`、debugpy |
+| `lua/neotest_cpp.lua` | **自写的 C++/gtest neotest 适配器**（解析 `TEST_F`、拼 `--gtest_filter`、解析 gtest 输出） |
+| `lua/plugins/neotest-cpp.lua` | 把上面这个适配器挂进 neotest 的 `adapters` |
 | `lua/plugins/debug.lua` | codelldb 适配器、gtest 配置、`<Space>d*` 键位、DAP UI |
 
 neotest 侧的核心配置：
@@ -144,6 +164,17 @@ neotest 侧的核心配置：
   python = ".venv/bin/python",   -- 不能写成 { "uv", "run", "python" }，见下
 },
 ```
+
+```lua
+-- lua/plugins/neotest-cpp.lua（空表 = 用 neotest_cpp.lua 里的默认值）
+adapters = {
+  ["neotest_cpp"] = {},          -- 可写 { auto_build = false } 等覆盖默认配置
+},
+```
+
+`neotest_cpp` 的默认值（改测试运行行为就改这里）：二进制
+`build-Debug/bin/LearnCPP_Test`、构建 `cmake --build build-Debug --target LearnCPP_Test`、
+`auto_build = true`。注：`TEST_P` 之类的参数化宏没解析（本项目没有用到）。
 
 ---
 
@@ -173,11 +204,17 @@ Run to Cursor、表达式求值、变量面板等。
 ## 常见问题
 
 **Q（测试）: 提示 "No tests found"？**
-按顺序排查：
-1. 文件名是否匹配 `test_*.py`（neotest-python 按文件名判断，不看内容）
-2. 项目根有没有 `pyproject.toml`——adapter 靠它确定 root
-3. 光标是否在 nvim 打开的文件里（不带参数的调用会回退到当前缓冲区）
-4. 看日志确认 adapter 是否被识别：
+先确认是哪种文件——**Python 和 C++ 是两个不同的适配器**，排查方式不一样：
+
+- C++（`.cc`/`.cpp`/`.cxx`）：适配器是自写的 `neotest_cpp`，按**内容**判断
+  （必须含 `TEST_F(`），root 是有 `compile_commands.json` 或 `CMakeLists.txt` 的目录。
+  若整个文件里每一行都提示，大概率是适配器没注册上——看下面的日志。
+- Python：文件名必须匹配 `test_*.py`（neotest-python 按**文件名**判断，不看内容），
+  且项目根要有 `pyproject.toml`。
+
+其余通用排查：
+1. 光标是否在 nvim 打开的文件里（不带参数的调用会回退到当前缓冲区）
+2. 看日志确认 adapter 是否被识别：
    ```bash
    tail -30 ~/.local/state/nvim/neotest.log
    ```
@@ -257,10 +294,22 @@ require("dap-python").setup("debugpy-adapter")
   `{ suite = true }`，或什么都不传（跑光标最近用例）。
   传 `{ file = ... }` 之类**无效**，会静默回退到当前缓冲区。
 - 该版本 neotest **没有** `get_adapters()` 这个 API。
+  列出已注册的适配器用 `require("neotest.config").adapters`（每项有 `name`）。
 - `discover_positions` 是 nio 异步函数，必须在 `nio.run()` 里调用。
 - 结果不在回调里返回：用 `require("neotest").state.status_counts(adapter_id)`
   读，等 `running` 归零才算跑完。adapter_id 形如
-  `neotest-python:/绝对路径/项目根`。
+  `neotest-python:/绝对路径/项目根`，由 `("%s:%s"):format(adapter.name, root)`
+  拼出来——**自定义适配器必须设 `adapter.name`**，否则这里直接报错。
+- `is_test_file` / `root` 可能在**非 nio 协程**的上下文里被调用
+  （比如 neotest 的 dap strategy 里）。所以别在它们里面用
+  `neotest.lib.files.read`——那是 `@async` 的，会直接报
+  "Cannot call async function from non-async context"；自己用 `io.open` 读。
+- `neotest.lib.treesitter.parse_positions` 的 `build_position` 传**函数**时会
+  **退回主进程解析**（子进程没法传函数）；想保留子进程解析就传字符串，
+  如 `'require("neotest_cpp").build_position'`。
+- 探针脚本里 `vim.system(...)` 之后一定要 `:wait()`（或在 async 上下文里用
+  `vim.system():wait()`）。漏了会留下后台 cmake 进程，和随后的构建抢
+  `build-Debug/`，实测表现为 **exit code 2 的假失败**。
 
 **nvim-dap 侧**
 - `<Space>d` 组的键位**全部定义在 `debug.lua` 的 `config` 函数里**，
