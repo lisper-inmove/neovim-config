@@ -6,3 +6,25 @@
 --
 -- Or remove existing autocmds by their group name (which is prefixed with `lazyvim_` for the defaults)
 -- e.g. vim.api.nvim_del_augroup_by_name("lazyvim_wrap_spell")
+
+-- 光标在有诊断的行上停留（LazyVim 把 updatetime 设成了 200ms）时，自动弹出完整
+-- 消息的浮窗：浮窗会按窗口宽度折行、并按折行后的高度开窗，所以 clang-tidy 那种
+-- 上百字符的消息也能一次看全（行内提示做不到，见 lua/plugins/diagnostics.lua）。
+-- 移动光标 / 进入插入模式 / 切走 buffer 时自动关掉。
+vim.api.nvim_create_autocmd("CursorHold", {
+  group = vim.api.nvim_create_augroup("user_diagnostic_float", { clear = true }),
+  callback = function()
+    -- 特殊 buffer（neo-tree、trouble、终端等）不弹
+    if vim.bo.buftype ~= "" then
+      return
+    end
+    local lnum = vim.api.nvim_win_get_cursor(0)[1] - 1
+    if vim.tbl_isempty(vim.diagnostic.get(0, { lnum = lnum })) then
+      return
+    end
+    vim.diagnostic.open_float({
+      scope = "line",
+      close_events = { "CursorMoved", "CursorMovedI", "InsertEnter", "BufLeave" },
+    })
+  end,
+})
