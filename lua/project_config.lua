@@ -7,9 +7,12 @@
 --   项目根的定义还不一样（debug 用 cwd，neotest 向上找 CMakeLists.txt）。
 --   现在统一由项目根的 .nvim.yaml 提供，两边读同一份、用同一个找根函数。
 --
--- 配置文件只需要一个 target 名字（YAML 子集解析器见 lua/yaml_lite.lua）：
---   target: LearnCPP_Test
--- Debug 构建目录不写，从 CMake 自己的配置里找（见下面 locate_debug_build_dir）。
+-- 配置文件是项目根的 .nvim.yaml（解析器见 lua/yaml_lite.lua），target 两种写法都行：
+--   1) 相对项目根的路径（推荐，产物放哪一目了然）
+--        target: build-Debug/bin/LearnCPP_Test
+--   2) 纯目标名（不想写路径时，让 CMake 配置帮着找）
+--        target: LearnCPP_Test
+-- 构建目录不写也行，从 CMake 自己的配置里找（见下面 locate_debug_build_dir）。
 --
 -- 优先级（后者覆盖前者）：
 --   内置默认 M.DEFAULTS  ←  插件 spec 的 opts  ←  项目 .nvim.yaml
@@ -18,7 +21,6 @@
 --
 -- 逃生舱字段（CMake 布局特殊时才需要）：
 --   build_dir: build-Debug      # 跳过自动查找，直接用这个（相对项目根）
---   binary: out/Rel/my_tests    # 跳过查找，二进制就写这儿
 --   build_args: [make, -j]      # 整条构建命令自己写
 --   auto_build: false           # 跑/调之前不自动编译
 --   extensions: [cc, cpp]       # 哪些扩展名可能算测试文件
@@ -43,9 +45,8 @@ local SKIP_DIRS = {
 local BUILD_DIR_MAX_DEPTH = 3
 
 ---@class project_config.Defaults
----@field target? string CMake 目标名（= 二进制文件名）
+---@field target? string 二进制相对项目根的路径；或只写目标名（= 二进制文件名）
 ---@field build_dir? string 构建目录（相对项目根）
----@field binary? string 二进制路径（相对项目根或绝对）
 ---@field build_args? string[] 整条构建命令
 ---@field auto_build boolean 跑/调之前先增量编译
 ---@field extensions string[] 视为测试源码的扩展名
@@ -90,7 +91,7 @@ function M.root_for_buffer()
       return root
     end
   end
-  return vim.fn.getcwd()
+  return vim.uv.cwd() or "."
 end
 
 ---@param path string
@@ -98,6 +99,39 @@ end
 local function is_abs(path)
   return path:sub(1, 1) == "/" or path:match("^%a:[/\\]") ~= nil -- 后者兼容 Windows 盘符
 end
+
+-- vim.notify 在 fast event context 里会抛 E5560（实测：nvim_echo must not be
+-- called in a fast event context），而 neotest 的 nio 协程就是 fast context。
+-- 统一走这个：快速上下文里排到主循环再发，别让一条提示把整个扫描打断。
+---@param msg string
+---@param level integer
+local function notify_safe(msg, level)
+  if vim.in_fast_event() then
+    vim.schedule(function()
+      vim.notify(msg, level)
+    end)
+  else
+    vim.notify(msg, level)
+  end
+end
+
+-- vim.fn.shellescape 的纯 Lua 版。同样是因为 fast event context：
+-- vim.fn.shellescape 在那里抛 E5560（实测）。只用来拼给人看的构建提示，
+-- 按 shell 规则加引号就够了。
+---@param s string
+---@return string
+local function shell_quote(s)
+  if s == "" then
+    return "''"
+  end
+  if s:match("^[%w_%-%./:=@%%+,]+$") then
+    return s
+  end
+  return "'" .. s:gsub("'", "'\\''") .. "'"
+end
+
+-- neotest_cpp.build_spec 拼 shell 命令时也要用（它同样跑在 fast context 里）
+M.shell_quote = shell_quote
 
 ---@param root string
 ---@param path string
@@ -162,7 +196,7 @@ function M.raw(root)
       fd:close()
       local parsed, err = require("yaml_lite").parse(content)
       if err then
-        vim.notify(("%s 解析失败，改用内置默认：%s"):format(path, err), vim.log.levels.WARN)
+        notify_safe(("%s 解析失败，改用内置默认：%s"):format(path, err), vim.log.levels.WARN)
       else
         data = parsed or {}
       end
@@ -281,7 +315,7 @@ local function locate_debug_build_dir(root)
   end, debug_dirs)
   local pool = #named > 0 and named or debug_dirs
   table.sort(pool)
-  vim.notify(
+  notify_safe(
     ("找到 %d 个 Debug 构建目录，用 %s（要固定用哪个就在 .nvim.yaml 里写 build_dir）"):format(
       #debug_dirs,
       rel_to_root(root, pool[1])
@@ -349,7 +383,9 @@ end
 
 -- 探测结果按根缓存。只缓存**成功**：失败时每次都重来，这样你「刚 cmake configure 完
 -- 回 nvim 按 <Space>tr」就能立刻生效，而不用重启 nvim 或手动清缓存。
----@type table<string, { binary: string, build_dir: string }>
+-- 必须连 target 一起存下来做比对：只按根缓存的话，改了 .nvim.yaml 里的 target
+-- 仍会命中旧二进制（旧文件还在，executable 检查照样通过），表现为「配置改了没反应」。
+---@type table<string, { target: string, binary: string, build_dir: string }>
 local discovery_cache = {}
 
 ---@param root string
@@ -357,8 +393,8 @@ local discovery_cache = {}
 ---@return string|nil binary, string|nil build_dir, string|nil problem
 local function discover(root, target)
   local cached = discovery_cache[root]
-  -- 缓存里的二进制要是被删了（构建目录换了位置之类），作废重找
-  if cached and vim.fn.executable(cached.binary) == 1 then
+  -- target 变了、或缓存里的二进制被删了（构建目录换位置之类），都作废重找
+  if cached and cached.target == target and vim.fn.executable(cached.binary) == 1 then
     return cached.binary, cached.build_dir
   end
 
@@ -379,7 +415,7 @@ local function discover(root, target)
       )
   end
 
-  discovery_cache[root] = { binary = binary, build_dir = build_dir }
+  discovery_cache[root] = { target = target, binary = binary, build_dir = build_dir }
   return binary, build_dir
 end
 
@@ -405,26 +441,35 @@ function M.resolve(root, defaults)
 
   ---@type string|nil
   local target = type(cfg.target) == "string" and cfg.target or nil
-  local binary_override = type(cfg.binary) == "string" and cfg.binary or nil
   local build_dir_override = type(cfg.build_dir) == "string" and cfg.build_dir or nil
 
-  -- 只写了 binary 没写 target：目标名取二进制文件名（反过来也行）
-  if not target and binary_override then
-    target = vim.fs.basename(binary_override)
-  end
+  -- target 有两种写法：
+  --   LearnCPP_Test                  → 目标名：在探测到的 Debug 构建目录里按名字找
+  --   build-Debug/bin/LearnCPP_Test  → 含路径分隔符就当**相对项目根的路径**，直接指向二进制
+  -- 两种都认，是因为「产物放在哪」有时只有写配置的人知道（比如 RUNTIME_OUTPUT_DIRECTORY
+  -- 藏在 CMakeLists 里、缓存里读不到）；不知道时才让 CMake 配置帮着找。
+  local target_is_path = target ~= nil and (target:find("/", 1, true) or target:find("\\", 1, true)) ~= nil
 
   ---@type string|nil
   local binary, build_dir, problem
-  if binary_override then
-    binary = abs_from(root, binary_override)
-    -- binary 写死了但没写 build_dir：还是探一下，好让「自动编译」有命令可用
-    build_dir = build_dir_override and abs_from(root, build_dir_override) or nil
-    if not build_dir then
-      build_dir = locate_debug_build_dir(root)
+  if target_is_path then
+    binary = abs_from(root, target)
+    if build_dir_override then
+      build_dir = abs_from(root, build_dir_override)
+    else
+      local locate_problem
+      build_dir, locate_problem = locate_debug_build_dir(root)
+      -- 二进制已经在（或构建目录找得到、能靠自动编译产出）就不算问题
+      if vim.fn.executable(binary) ~= 1 and not build_dir then
+        problem = ("测试可执行文件不存在：%s\n%s"):format(
+          binary,
+          locate_problem or "而且没找到可用的 Debug 构建目录，没法自动构建"
+        )
+      end
     end
   elseif target then
-    build_dir = build_dir_override and abs_from(root, build_dir_override) or nil
-    if build_dir then
+    if build_dir_override then
+      build_dir = abs_from(root, build_dir_override)
       binary = find_binary(build_dir, target)
       if not binary then
         problem = ("在指定的构建目录 %s 里没找到名为 %s 的可执行文件"):format(
@@ -436,25 +481,26 @@ function M.resolve(root, defaults)
       binary, build_dir, problem = discover(root, target)
     end
   else
-    problem = ("%s 没写 target（也没写 binary），不知道该跑哪个测试目标"):format(
-      root .. "/" .. M.CONFIG_FILE
-    )
+    problem = ("%s 没写 target，不知道该跑哪个测试目标"):format(root .. "/" .. M.CONFIG_FILE)
   end
+
+  -- CMake 只吃目标名（不含目录），所以 --target 一律取二进制/Target 的文件名
+  local target_name = vim.fs.basename(binary or target or "")
 
   -- 构建命令：显式给了就用，否则按探测到的构建目录拼；两样都没有就留空
   local build_args = as_str_list(cfg.build_args, {})
-  if #build_args == 0 and build_dir and target then
-    build_args = { "cmake", "--build", rel_to_root(root, build_dir), "--target", target }
+  if #build_args == 0 and build_dir and target_name ~= "" then
+    build_args = { "cmake", "--build", rel_to_root(root, build_dir), "--target", target_name }
   end
 
   return {
     root = root,
-    target = target,
-    name = target,
+    target = target_name ~= "" and target_name or nil,
+    name = target_name ~= "" and target_name or nil,
     build_dir = build_dir,
     binary = binary,
     build_args = build_args,
-    build_hint = #build_args > 0 and table.concat(vim.tbl_map(vim.fn.shellescape, build_args), " ") or "",
+    build_hint = #build_args > 0 and table.concat(vim.tbl_map(shell_quote, build_args), " ") or "",
     -- 没有构建命令就谈不上自动编译，别让调用方去跑一条空命令
     auto_build = cfg.auto_build ~= false and #build_args > 0,
     extensions = as_str_list(cfg.extensions, M.DEFAULTS.extensions),
@@ -474,7 +520,27 @@ end
 ---@param defaults? table
 ---@return project_config.Resolved
 function M.resolve_for_path(path, defaults)
-  return M.resolve(M.find_root(path) or vim.fn.getcwd(), defaults)
+  return M.resolve(M.find_root(path) or vim.uv.cwd() or ".", defaults)
+end
+
+-- 只取某个文件所属项目的 extensions。
+--
+-- 这是给 is_test_file 用的**廉价谓词**：neotest 在 fast event context 里对每个
+-- 候选文件调一次，所以这里
+--   * 不做 CMake 探测（找不到构建目录时失败不缓存，会退化成每个文件扫一遍目录树）
+--   * 不调 vim.notify（fast context 里抛 E5560）
+-- 只做「找根 + 读缓存的 YAML」这两件 uv/io 就够的事。
+-- 优先级与 resolve 一致：项目 .nvim.yaml > defaults(opts) > 内置默认。
+---@param path string
+---@param defaults? table
+---@return string[]
+function M.extensions_for_path(path, defaults)
+  local fallback = as_str_list((defaults or {}).extensions, M.DEFAULTS.extensions)
+  local root = M.find_root(path)
+  if not root then
+    return fallback
+  end
+  return as_str_list(M.raw(root).extensions, fallback)
 end
 
 return M

@@ -58,7 +58,7 @@
 |---|---|
 | 插件 | `neotest` + `neotest-python`、自写 `neotest_cpp`（测试）、`nvim-dap-python` + `debugpy`、`codelldb`（调试） |
 | Python 项目 | 根目录有 `pyproject.toml`；测试文件命名 `test_*.py` 或 `*_test.py`；根目录有 `.venv/`（`uv sync` 生成） |
-| C++ 项目 | 项目根有 `.nvim.yaml`，里面写一行 `target: <测试目标名>`；用 CMake 配置过一次 Debug 构建（构建目录里有 `CMakeCache.txt`）。项目根 = 有 `.nvim.yaml` / `compile_commands.json` / `CMakeLists.txt` 的目录 |
+| C++ 项目 | 项目根有 `.nvim.yaml`，里面写一行 `target: <相对项目根的二进制路径>`（也可以只写目标名）；用 CMake 配置过一次 Debug 构建（构建目录里有 `CMakeCache.txt`）。项目根 = 有 `.nvim.yaml` / `compile_commands.json` / `CMakeLists.txt` 的目录 |
 | treesitter | 需要 python parser 和 cpp parser（用例靠 tree-sitter 解析） |
 
 `lazyvim.plugins.extras.test.core` 只提供 neotest 骨架和 `<Space>t*` 键位，
@@ -162,45 +162,59 @@ C++ 的目标名放在**项目根目录的 `.nvim.yaml`** 里（解析逻辑见
 
 ```yaml
 # <项目根>/.nvim.yaml
-target: LearnCPP_Test
+target: build-Debug/bin/LearnCPP_Test    # 相对项目根的路径
 ```
 
-**只需要一个目标名**。构建目录和二进制位置都不写，从 CMake 自己的配置里找。
+`target` 两种写法都认：
 
-### Debug 构建路径是怎么找出来的
+| 写法 | 语义 | 二进制怎么定 |
+|---|---|---|
+| `build-Debug/bin/LearnCPP_Test` | **相对项目根的路径** | 直接 `<项目根>/<target>` |
+| `LearnCPP_Test` | 目标名 | 在探测到的 Debug 构建目录里按名字找 |
+
+含路径分隔符（`/`）就当路径，否则当目标名。**推荐写路径**——产物放在哪
+一目了然，也不依赖「按名字能找到」。纯名字适合懒得写路径、或产物位置
+本来就是标准布局的项目。
+
+两种写法下，构建命令里的 `--target` 都取**文件名**（`LearnCPP_Test`），
+因为 CMake 只吃目标名、不吃目录。
+
+### 构建目录（Debug）是怎么找出来的
+
+不论 `target` 写哪种形式，**构建目录**都从 CMake 自己的配置里找：
 
 1. 在项目根下扫含 `CMakeCache.txt` 的目录（往下最多 3 层，跳过
    `.git` / `CMakeFiles` / `node_modules` / `.venv`）
 2. 读每个缓存里的 `CMAKE_BUILD_TYPE`，取值为 `Debug` 的那个
-3. 在选中的构建目录里按名字找 `target` 这个可执行文件：
-   先试 `<构建目录>/bin/<target>`、`<构建目录>/<target>`，没有再全目录找
-4. 构建命令 = `cmake --build <相对项目根的构建目录> --target <target>`
+3. 只在 `target` 写**纯名字**时才多一步：在选中的构建目录里按名字找可执行文件，
+   先试 `<构建目录>/bin/<名字>`、`<构建目录>/<名字>`，没有再全目录找
+4. 构建命令 = `cmake --build <相对项目根的构建目录> --target <文件名>`
 
 ⚠️ **为什么读 `CMakeCache.txt` 而不是 `CMakePresets.json`**：预设文件可能是
 过期的。LearnCPP 的 `CMakePresets.json` 现在还写着 Windows 的
 `F:/codes/...` 和 `build/debug`，跟实际在用的 `build-Debug` 对不上；
 构建目录里的缓存才是「这次构建真的用的配置」。
 
-⚠️ **为什么是「按名字找」而不是拼 `<构建目录>/bin/<target>`**：`bin/` 那层是
-`config/googletest.cmake` 里 `set_target_properties(... RUNTIME_OUTPUT_DIRECTORY
+⚠️ **为什么纯名字模式要「按名字找」而不是拼 `<构建目录>/bin/<名字>`**：`bin/`
+那层是 `config/googletest.cmake` 里 `set_target_properties(... RUNTIME_OUTPUT_DIRECTORY
 ".../bin")` 定的，属于普通变量、**不进 `CMakeCache.txt`**，所以读不到，只能找。
 （实际项目的产物布局千奇百怪，按名字找反而更稳。）
+**这也正是 target 支持直接写路径的原因**：位置只有你知道时，就别让程序猜。
 
 找不到时不会瞎猜，报错里会写清卡在哪一步（见「常见问题」）。
 
 ### 可选字段（CMake 布局特殊时才用）
 
 ```yaml
-target: LearnCPP_Test
+target: build-Debug/bin/LearnCPP_Test
 build_dir: build-Debug     # 固定用这个构建目录，跳过 Debug 自动查找
-binary: out/Rel/my_tests   # 干脆自己写二进制路径（相对项目根或绝对）
 build_args: [make, -j]     # 干脆自己写整条构建命令
 auto_build: false          # 跑/调之前不自动编译
 extensions: [cc, cpp]      # 哪些扩展名可能算测试文件（默认 cc/cpp/cxx）
 ```
 
-`binary` / `build_args` 写了就**整体覆盖**推导值，不做拼接混合——
-免得出现「binary 指向 A 目录、build_args 还是 cmake 那套」这种半吊子状态。
+`build_args` 写了就**整体覆盖**推导值，不做拼接混合——免得出现
+「二进制指向 A 目录、构建命令还是 cmake 那套」这种半吊子状态。
 `auto_build` 默认 `true`，但**没有可用的构建命令时它恒为 false**（不会去跑空命令）。
 
 ### 几点行为
@@ -292,17 +306,31 @@ Run to Cursor、表达式求值、变量面板等。
 先确认是哪种文件——**Python 和 C++ 是两个不同的适配器**，排查方式不一样：
 
 - C++（`.cc`/`.cpp`/`.cxx`）：适配器是自写的 `neotest_cpp`，按**内容**判断
-  （必须含 `TEST_F(`），root 是有 `compile_commands.json` 或 `CMakeLists.txt` 的目录。
-  若整个文件里每一行都提示，大概率是适配器没注册上——看下面的日志。
+  （必须含 `TEST_F(`），root 是有 `.nvim.yaml` / `compile_commands.json` /
+  `CMakeLists.txt` 的目录。**注意 `tests/tester.cc` 这类文件里其实一个
+  `TEST_F(` 都没有**，对它报 "No tests found" 是正确的。
 - Python：文件名必须匹配 `test_*.py`（neotest-python 按**文件名**判断，不看内容），
   且项目根要有 `pyproject.toml`。
 
 其余通用排查：
 1. 光标是否在 nvim 打开的文件里（不带参数的调用会回退到当前缓冲区）
-2. 看日志确认 adapter 是否被识别：
+2. ⚠️ **先看日志，别只看界面**。如果适配器回调抛了错（最常见的是在 fast event
+   context 里调了 `vim.fn.getcwd` / `vim.notify`，报 E5560），neotest 会**静默**
+   中止位置扫描，界面上就是一句 "No tests found"，看不到任何错误原因：
    ```bash
-   tail -30 ~/.local/state/nvim/neotest.log
+   grep -E "E5560|Couldn't find positions|ERROR" ~/.local/state/nvim/neotest.log | tail
    ```
+3. 确认 adapter 在列表里：
+   ```vim
+   :lua print(vim.inspect(vim.tbl_map(function(a) return a.name end, require("neotest.config").adapters)))
+   ```
+4. 直接问适配器自己：
+   ```vim
+   :lua print(require("neotest_cpp").is_test_file(vim.api.nvim_buf_get_name(0)))
+   :lua print(vim.inspect(require("project_config").resolve_for_buffer()))
+   ```
+5. 改过 `lua/neotest_cpp.lua` / `lua/project_config.lua` 后**必须重启 nvim**——
+   Lua 模块加载后缓存在 `package.loaded`，改文件不会热更新。
 
 **Q（测试/调试）: 为什么不能用 `uv run python`，明明终端里都这么用？**
 因为 `<Space>td` 调试时，neotest 会把解释器命令**原样**塞进 debugpy 的
@@ -358,8 +386,9 @@ require("dap-python").setup("debugpy-adapter")
 |---|---|---|
 | 没找到 CMake 构建目录（没有 CMakeCache.txt） | 从没配置过 | `cmake -B build-Debug -DCMAKE_BUILD_TYPE=Debug` |
 | 没找到 `CMAKE_BUILD_TYPE=Debug` 的构建目录 | 配置过但不是 Debug（报错里会列出每个目录的实际值） | 用 `-DCMAKE_BUILD_TYPE=Debug` 重新配置，或在 `.nvim.yaml` 写 `build_dir` 指定 |
-| 在构建目录 X 里没找到名为 Y 的可执行文件 | 目标名写错，或者还没构建过 | 先构建（报错里给了命令），或核对 `.nvim.yaml` 的 `target` |
-| .nvim.yaml 没写 target | 没建配置文件 | 加一行 `target: <目标名>` |
+| 在构建目录 X 里没找到名为 Y 的可执行文件 | `target` 写的是纯名字，且名字写错或还没构建过 | 先构建（报错里给了命令），或核对 `target`；也可以直接写相对路径 |
+| .nvim.yaml 没写 target | 没建配置文件 | 加一行 `target: <相对路径>`（也可以只写目标名） |
+| 测试可执行文件不存在：`<路径>` | `target` 写的是路径，但文件不在，且没找到构建目录 | 核对路径是否相对项目根；或补 `build_dir` 让自动编译有命令可用 |
 
 不想猜的话，把光标放进测试文件里执行，一次拿到全部解析结果：
 ```vim
@@ -409,6 +438,29 @@ require("dap-python").setup("debugpy-adapter")
   （比如 neotest 的 dap strategy 里）。所以别在它们里面用
   `neotest.lib.files.read`——那是 `@async` 的，会直接报
   "Cannot call async function from non-async context"；自己用 `io.open` 读。
+- ⚠️ **`is_test_file` / `build_spec` 实际跑在 fast event context 里**
+  （nio 协程由 libuv 回调驱动）。那里下面这些会抛
+  `E5560: ... must not be called in a fast event context`：
+
+  | 调用 | fast context 安全？ |
+  |---|---|
+  | `vim.fn.getcwd()` | ✗ |
+  | `vim.fn.shellescape()` | ✗ |
+  | `vim.notify()` | ✗（内部是 `nvim_echo`） |
+  | `vim.fn.executable()` | ✓ |
+  | `vim.uv.*` / `io.*` / `vim.fs.*` / `vim.tbl_map` | ✓ |
+
+  代价很大：只要 `is_test_file` 抛一次错，neotest 的 `_update_positions`
+  就整个中止，`<Space>tr` 报 **"No tests found"** —— 而且**界面上什么错误都看不到**，
+  只有 `~/.local/state/nvim/neotest.log` 里有 `Couldn't find positions in path ...`
+  和 E5560 堆栈。所以这些回调里要发通知就
+  `vim.schedule(function() vim.notify(...) end)`；`lua/project_config.lua` 为此专门有
+  `notify_safe` / `shell_quote`，`is_test_file` 也只走廉价的 `extensions_for_path`，
+  不做 CMake 探测。
+- 排查这类问题时先看日志，别只看界面：
+  ```bash
+  grep -E "E5560|Couldn't find positions" ~/.local/state/nvim/neotest.log | tail
+  ```
 - `neotest.lib.treesitter.parse_positions` 的 `build_position` 传**函数**时会
   **退回主进程解析**（子进程没法传函数）；想保留子进程解析就传字符串，
   如 `'require("neotest_cpp").build_position'`。

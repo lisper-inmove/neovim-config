@@ -94,8 +94,13 @@ function M.is_test_file(file_path)
   if not ext then
     return false
   end
-  -- 扩展名清单也按文件所属项目取（.nvim.yaml 的 extensions 可以覆盖）
-  if not vim.tbl_contains(project_config.resolve_for_path(file_path, M.opts).extensions, ext) then
+  -- 扩展名清单也按文件所属项目取（.nvim.yaml 的 extensions 可以覆盖）。
+  -- 用 extensions_for_path 而不是 resolve_for_path：这个函数在 neotest 的
+  -- fast event context 里被每个候选文件调用，不能做 CMake 探测、不能 notify
+  -- （vim.fn.getcwd / vim.notify 在那里会抛 E5560，实测）。
+  -- 之前用 resolve_for_path 会抛错，导致 neotest 的 _update_positions 整个中止，
+  -- <leader>tr 就报 "No tests found"。
+  if not vim.tbl_contains(project_config.extensions_for_path(file_path, M.opts), ext) then
     return false
   end
   -- 只有含 gtest 宏的文件才当作测试文件（同一棵树下也有普通源文件）
@@ -212,8 +217,10 @@ function M.build_spec(args)
     -- 先增量编译再跑，两者输出都进 neotest 的 output 面板：
     -- 编译不过时你看到的是编译错误，而不是一个过期的二进制在跑
     local build = c.build_hint
-    local run = table.concat(vim.tbl_map(vim.fn.shellescape, command), " ")
-    command = { "bash", "-c", ("cd %s && %s && exec %s"):format(vim.fn.shellescape(dir), build, run) }
+    -- 注意用 project_config.shell_quote 而不是 vim.fn.shellescape：
+    -- build_spec 跑在 neotest 的 fast event context 里，后者会抛 E5560（实测）
+    local run = table.concat(vim.tbl_map(project_config.shell_quote, command), " ")
+    command = { "bash", "-c", ("cd %s && %s && exec %s"):format(project_config.shell_quote(dir), build, run) }
   end
 
   return { command = command, cwd = dir }
