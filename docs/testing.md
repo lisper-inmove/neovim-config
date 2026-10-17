@@ -416,6 +416,34 @@ require("dap-python").setup("debugpy-adapter")
 
 ---
 
+## 探针（`scripts/probe/`）
+
+改完 `project_config.lua` / `neotest_cpp.lua` / `yaml_lite.lua` 之后跑一遍：
+
+```bash
+./scripts/probe/run.sh
+```
+
+| 探针 | 覆盖什么 |
+|---|---|
+| `probe-yaml` | YAML 子集解析器：类型、注释、引号、块列表/行内列表、CRLF、各类错误 |
+| `probe-config` | `.nvim.yaml` 解析、CMake Debug 目录探测、`target` 两种写法、缓存失效、优先级、四种报错文案 |
+| `probe-fastctx` | **在 libuv 回调里**调 `is_test_file` / `build_spec` / `resolve`，防 E5560 回归 |
+| `probe-debug` | 真加载 `debug.lua` 的插件 spec，验证 `dap.configurations.cpp` 与换项目时的行为 |
+| `probe-real-session` | 走真实配置（lazy.nvim），验证 adapter 注册、root 一致、`build_spec` 生成的完整运行命令 |
+
+- 默认测真实项目 `~/code/LearnCPP`；换项目：
+  `PROBE_PROJECT=/path/to/proj ./scripts/probe/run.sh`
+- 前四个用 `nvim -l` 跑（退出码可信），`probe-real-session` 用
+  `nvim --headless -c "luafile ..."` 走用户配置（那种模式退出码不可信，
+  靠 `__PROBE_OK__` 标记判断）——原因见下一节。
+- **`show-config.lua` 不是测试，是排查工具**：单独打印某个项目解析出来的
+  `root` / `target` / `build_dir` / `binary` / `problem`。
+  ```bash
+  nvim --clean -l scripts/probe/show-config.lua
+  PROBE_PROJECT=/path/to/proj nvim --clean -l scripts/probe/show-config.lua
+  ```
+
 ## 排查用的内部机制
 
 写自动化脚本时会踩到这些：
