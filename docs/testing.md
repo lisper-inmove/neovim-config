@@ -58,7 +58,7 @@
 |---|---|
 | 插件 | `neotest` + `neotest-python`、自写 `neotest_cpp`（测试）、`nvim-dap-python` + `debugpy`、`codelldb`（调试） |
 | Python 项目 | 根目录有 `pyproject.toml`；测试文件命名 `test_*.py` 或 `*_test.py`；根目录有 `.venv/`（`uv sync` 生成） |
-| C++ 项目 | 二进制在 `<项目根>/build-Debug/bin/LearnCPP_Test`；项目根 = 有 `compile_commands.json` 或 `CMakeLists.txt` 的目录 |
+| C++ 项目 | 项目根有 `.nvim.yaml`，里面写一行 `target: <测试目标名>`；用 CMake 配置过一次 Debug 构建（构建目录里有 `CMakeCache.txt`）。项目根 = 有 `.nvim.yaml` / `compile_commands.json` / `CMakeLists.txt` 的目录 |
 | treesitter | 需要 python parser 和 cpp parser（用例靠 tree-sitter 解析） |
 
 `lazyvim.plugins.extras.test.core` 只提供 neotest 骨架和 `<Space>t*` 键位，
@@ -112,7 +112,8 @@ python 适配器，从而覆盖 `nvim-dap-python` 注册的那个。`python.lua`
 1. **发现用例**：tree-sitter-cpp 解析文件里的 `TEST_F(Suite, Name)`，
    用例名取 gtest 全名（`Tester.OpenCV_Edge_Detect`），和 `<Space>tg`
    列表、`--gtest_list_tests` 里看到的一致。
-2. **运行**：先增量 `cmake --build build-Debug --target LearnCPP_Test`，
+2. **运行**：先按项目配置增量编译（LearnCPP 拼出来的是
+   `cmake --build build-Debug --target LearnCPP_Test`），
    再跑 `<二进制> --gtest_filter=<光标所在用例>`。编译输出和测试输出都在
    `<Space>to` 里——编译不过时你看到的是编译错误，而不是旧二进制在跑。
 3. **解析**：读 gtest 的 `[ OK ]` / `[ FAILED ]` 行回填状态与失败信息。
@@ -125,10 +126,9 @@ python 适配器，从而覆盖 `nvim-dap-python` 注册的那个。`python.lua`
 
 ### C++ / gtest —— 调试（`<Space>tg`）
 
-1. **先构建**，否则会提示找不到二进制：
-   ```bash
-   cmake --build build-Debug -j
-   ```
+1. **先构建**，否则会提示找不到二进制（构建命令从项目 `.nvim.yaml` 里的
+   `target` 和找到的 Debug 构建目录拼出来，找不到二进制时的报错里会直接
+   把它写出来）。
 2. 按 `<Space>tg`，从列表里选用例：
    - `▶ 运行全部测试`
    - `⌨ 手动输入过滤器…`（gtest 语法：全称 `Tester.OpenCV_Hist_Match`，或通配 `*Hist*`）
@@ -137,11 +137,90 @@ python 适配器，从而覆盖 `nvim-dap-python` 注册的那个。`python.lua`
 用例列表是执行 `<二进制> --gtest_list_tests` 解析出来的，过滤器通过
 `--gtest_filter=` 传给调试目标。
 
-路径约定（`debug.lua` 里写死）：二进制必须是
-`<项目根>/build-Debug/bin/LearnCPP_Test`，项目根取 nvim 的 cwd。
+路径约定：二进制与构建命令**不再是写死的**，由项目根 `.nvim.yaml` 里的
+`target` 加上从 CMake 配置里找到的 Debug 构建目录拼出来（见下节）。
+项目根和 neotest 那边用同一个函数——从当前缓冲区文件向上找 `.nvim.yaml` /
+`compile_commands.json` / `CMakeLists.txt`，所以**在任意 cwd 启动 nvim 都能用**
+（以前这里取 cwd，必须先在项目根打开 nvim）。
+
+配置选择器（`:lua require("dap").continue()` 无会话时）里的配置名会带项目
+目标名，且在**进入 cpp 文件时重建**——`config.name` 只能是字符串、又只能
+在插件加载时写一次，不重建的话在 A 项目里启动会顶着 B 项目的名字。
+定位不到二进制时这张表是空的（nvim-dap 会说没有可用配置），比塞一条
+`program=nil` 的坏配置报错清楚；详细原因看 `<Space>tg` 的通知。
 
 不在测试列表场景下，也可以用 `:lua require("dap").continue()` 走
 `dap.configurations.cpp` 里注册的两个配置（全部 / 手动 filter）。
+
+---
+
+## 项目根配置 `.nvim.yaml`
+
+C++ 的目标名放在**项目根目录的 `.nvim.yaml`** 里（解析逻辑见
+`lua/project_config.lua`）。换一个 C++ 项目只要在新项目根加这个文件，
+不用改 nvim 配置。
+
+```yaml
+# <项目根>/.nvim.yaml
+target: LearnCPP_Test
+```
+
+**只需要一个目标名**。构建目录和二进制位置都不写，从 CMake 自己的配置里找。
+
+### Debug 构建路径是怎么找出来的
+
+1. 在项目根下扫含 `CMakeCache.txt` 的目录（往下最多 3 层，跳过
+   `.git` / `CMakeFiles` / `node_modules` / `.venv`）
+2. 读每个缓存里的 `CMAKE_BUILD_TYPE`，取值为 `Debug` 的那个
+3. 在选中的构建目录里按名字找 `target` 这个可执行文件：
+   先试 `<构建目录>/bin/<target>`、`<构建目录>/<target>`，没有再全目录找
+4. 构建命令 = `cmake --build <相对项目根的构建目录> --target <target>`
+
+⚠️ **为什么读 `CMakeCache.txt` 而不是 `CMakePresets.json`**：预设文件可能是
+过期的。LearnCPP 的 `CMakePresets.json` 现在还写着 Windows 的
+`F:/codes/...` 和 `build/debug`，跟实际在用的 `build-Debug` 对不上；
+构建目录里的缓存才是「这次构建真的用的配置」。
+
+⚠️ **为什么是「按名字找」而不是拼 `<构建目录>/bin/<target>`**：`bin/` 那层是
+`config/googletest.cmake` 里 `set_target_properties(... RUNTIME_OUTPUT_DIRECTORY
+".../bin")` 定的，属于普通变量、**不进 `CMakeCache.txt`**，所以读不到，只能找。
+（实际项目的产物布局千奇百怪，按名字找反而更稳。）
+
+找不到时不会瞎猜，报错里会写清卡在哪一步（见「常见问题」）。
+
+### 可选字段（CMake 布局特殊时才用）
+
+```yaml
+target: LearnCPP_Test
+build_dir: build-Debug     # 固定用这个构建目录，跳过 Debug 自动查找
+binary: out/Rel/my_tests   # 干脆自己写二进制路径（相对项目根或绝对）
+build_args: [make, -j]     # 干脆自己写整条构建命令
+auto_build: false          # 跑/调之前不自动编译
+extensions: [cc, cpp]      # 哪些扩展名可能算测试文件（默认 cc/cpp/cxx）
+```
+
+`binary` / `build_args` 写了就**整体覆盖**推导值，不做拼接混合——
+免得出现「binary 指向 A 目录、build_args 还是 cmake 那套」这种半吊子状态。
+`auto_build` 默认 `true`，但**没有可用的构建命令时它恒为 false**（不会去跑空命令）。
+
+### 几点行为
+
+- **改完立刻生效**，不用重启 nvim（文件按 mtime 缓存）。
+- **YAML 写坏了不炸**：给一条 warning 说明第几行哪里不对，退回默认继续跑。
+- 解析器是自带的 YAML 子集（`lua/yaml_lite.lua`）：支持扁平 `key: value`、
+  `#` 注释、引号、布尔/数字、块列表和 `[a, b]` 行内列表。
+  **不支持嵌套映射**，写了会明确报错——本机没有 yaml/yq/ruby/PyYAML，
+  自写子集是为了不引入任何外部依赖。
+- **找不到构建目录时每次都重找**（失败结果不缓存）。所以你刚 `cmake configure`
+  完切回 nvim 按 `<Space>tr` 就能用，不用重启。
+- 项目根 = 从当前文件向上找 `.nvim.yaml` / `compile_commands.json` /
+  `CMakeLists.txt` 里最近的那个目录；`.nvim.yaml` 自己也是定根的标志，
+  非 CMake 项目（比如纯 Makefile）单靠它就能被认出来。
+
+优先级：**项目 `.nvim.yaml` > 插件 spec 里传的 opts > 内置默认**
+（项目文件更具体，所以压过全局）。内置默认只有 `auto_build = true` 和
+`extensions`——**`target` 故意不给默认值**，目标名必然因项目而异，
+瞎猜一个只会在新项目里报出更莫名其妙的错。
 
 ---
 
@@ -150,10 +229,13 @@ python 适配器，从而覆盖 `nvim-dap-python` 注册的那个。`python.lua`
 | 文件 | 内容 |
 |---|---|
 | `lazyvim.json` | 启用 `lazyvim.plugins.extras.test.core` |
+| `lua/project_config.lua` | **项目根 `.nvim.yaml` 的读取、CMake Debug 构建目录探测、二进制定位**，被下面两个模块共用 |
+| `lua/yaml_lite.lua` | 自带的 YAML 子集解析器（本机没有 yq/ruby/PyYAML，见下节说明） |
 | `lua/plugins/python.lua` | neotest-python adapter、`nvim-dap-python`、debugpy |
 | `lua/neotest_cpp.lua` | **自写的 C++/gtest neotest 适配器**（解析 `TEST_F`、拼 `--gtest_filter`、解析 gtest 输出） |
 | `lua/plugins/neotest-cpp.lua` | 把上面这个适配器挂进 neotest 的 `adapters` |
 | `lua/plugins/debug.lua` | codelldb 适配器、gtest 配置、`<Space>d*` 键位、DAP UI |
+| `<项目根>/.nvim.yaml` | 各 C++ 项目自己的二进制/构建命令（不在本仓库里） |
 
 neotest 侧的核心配置：
 
@@ -166,15 +248,18 @@ neotest 侧的核心配置：
 ```
 
 ```lua
--- lua/plugins/neotest-cpp.lua（空表 = 用 neotest_cpp.lua 里的默认值）
+-- lua/plugins/neotest-cpp.lua
 adapters = {
-  ["neotest_cpp"] = {},          -- 可写 { auto_build = false } 等覆盖默认配置
+  -- 空表 = 不覆盖任何东西，一切按项目根的 .nvim.yaml（没有就按内置默认）。
+  -- LazyVim 只在表非空时才调 adapter.setup()，所以空表 = 不调用 setup。
+  ["neotest_cpp"] = {},
 },
 ```
 
-`neotest_cpp` 的默认值（改测试运行行为就改这里）：二进制
-`build-Debug/bin/LearnCPP_Test`、构建 `cmake --build build-Debug --target LearnCPP_Test`、
-`auto_build = true`。注：`TEST_P` 之类的参数化宏没解析（本项目没有用到）。
+内置默认（`lua/project_config.lua` 的 `M.DEFAULTS`，仅在字段缺失时生效）：
+只有 `auto_build = true` 和 `extensions`。**`target` 没有默认值**——每个
+项目都得在 `.nvim.yaml` 里自己写。注：`TEST_P` 之类的参数化宏没解析
+（本项目没有用到）。
 
 ---
 
@@ -267,11 +352,31 @@ require("dap-python").setup("debugpy-adapter")
 3. **日志时间戳是 UTC，比本地时间早 8 小时**。看到"14:58"其实是本地 22:58。
 
 **Q（调试）: 按 `<Space>tg` 提示找不到测试可执行文件？**
-`debug.lua` 写死了路径 `<cwd>/build-Debug/bin/LearnCPP_Test`。
-先构建，并确认是在 **LearnCPP 项目根**打开 nvim（cwd 决定路径）。
+报错文案本身分三种情况，看它说哪一句就查哪一段：
+
+| 报错里说 | 原因 | 怎么办 |
+|---|---|---|
+| 没找到 CMake 构建目录（没有 CMakeCache.txt） | 从没配置过 | `cmake -B build-Debug -DCMAKE_BUILD_TYPE=Debug` |
+| 没找到 `CMAKE_BUILD_TYPE=Debug` 的构建目录 | 配置过但不是 Debug（报错里会列出每个目录的实际值） | 用 `-DCMAKE_BUILD_TYPE=Debug` 重新配置，或在 `.nvim.yaml` 写 `build_dir` 指定 |
+| 在构建目录 X 里没找到名为 Y 的可执行文件 | 目标名写错，或者还没构建过 | 先构建（报错里给了命令），或核对 `.nvim.yaml` 的 `target` |
+| .nvim.yaml 没写 target | 没建配置文件 | 加一行 `target: <目标名>` |
+
+不想猜的话，把光标放进测试文件里执行，一次拿到全部解析结果：
+```vim
+:lua print(vim.inspect(require("project_config").resolve_for_buffer()))
+```
+重点看 `root`（是不是解析到了别的项目根）、`build_dir`、`binary`、`problem`。
+
+**Q（调试）: `.nvim.yaml` 改了没反应？**
+配置按文件 mtime 缓存，改完存盘即生效。但如果构建目录整个换了位置
+（`build-Debug/` 删掉改成 `build/`），进程里的探测缓存可能还指着旧的——
+`.nvim.yaml` 存一次或执行下面的命令清掉：
+```vim
+:lua require("project_config").clear_cache()
+```
 
 **Q（调试）: `<Space>tg` 的选择列表是空的？**
-二进制存在但 `--gtest_list_tests` 没输出。手动验证：
+二进制存在但 `--gtest_list_tests` 没输出。手动验证（在项目根下）：
 ```bash
 ./build-Debug/bin/LearnCPP_Test --gtest_list_tests
 ```
@@ -326,3 +431,39 @@ require("dap-python").setup("debugpy-adapter")
 - `dap.adapters.X` 为 `nil` 就是"适配器没注册"，报错通常是
   `No adapter for type 'X'`。改适配器的注册顺序前，先确认没有别处也在注册同名
   type——`mason-nvim-dap` 的 `automatic_installation` 是常见的覆盖来源。
+
+**探针 / headless 脚本侧**
+
+- ⚠️ **`nvim -l script.lua` 下 `package.path` 不会跟着 `runtimepath` 变**。
+  比如这样跑：
+  ```bash
+  nvim --clean --cmd "set rtp+=~/.config/nvim" -l script.lua
+  ```
+  脚本里 `package.path` **照样看不到** `~/.config/nvim`，`require` 失败时的
+  报错也只列 `package.path` 那几条默认路径——**看起来就像 rtp 没生效**。
+  实际上 `require` 走的是 Neovim 自己的 loader，rtp 上的 `lua/` 正常能解析
+  （实测：加了 rtp 后 `require("project_config")` 成功，而 `package.path`
+  里始终没有那个目录）。
+
+  所以给探针挂依赖用 **rtp** 就够，`--cmd` 和脚本里 append 两种写法都行：
+  ```lua
+  vim.opt.rtp:append("/home/inmove/.config/nvim")
+  vim.opt.rtp:append("/home/inmove/.local/share/nvim/lazy/neotest")
+  ```
+  **别去改 `package.path`** —— 改了是白费功夫，还会让你以为"配置漏了"。
+  目录模块（如 `neotest.lib` → `neotest/lua/neotest/lib/init.lua`）也由这个
+  loader 处理，不用自己加 `?/init.lua`。
+- 探针想验真实加载链路（lazy.nvim、插件 setup 时机）就别用 `--clean`：
+  用 `nvim --headless -c "luafile probe.lua" -c "qa!"` 走用户配置，
+  脚本里再用 `require("lazy").load({ plugins = { ... } })` + `vim.wait` 等插件起来。
+- ⚠️ **`-c "luafile ..." -c "qa!"` 这种跑法，脚本里抛 Lua 错误退出码仍是 0**
+  ——错误只打在 stderr，nvim 照常退出，自动化里**会变成假成功**。实测：
+
+  | 跑法 | 脚本里 `error()` | 脚本里 `os.exit(7)` |
+  |---|---|---|
+  | `nvim --headless -c "luafile s.lua" -c "qa!"` | **0**（假成功） | 7 |
+  | `nvim -l s.lua` | 1 | 7 |
+
+  所以要么在脚本末尾显式 `os.exit(编号)`，要么打印一行标记（如
+  `__PROBE_OK__`）再靠 `grep` 判断——本仓库的探针用后者，因为走真实配置时
+  用的是 `-c "luafile"`，退出码不可信。

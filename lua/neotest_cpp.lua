@@ -8,47 +8,49 @@
 --
 -- 为什么自己写、不用现成的 alfaix/neotest-gtest：
 --   那个插件要求在 neotest summary 里用 :ConfigureGtest 把「测试 → 可执行文件」
---   手动绑定（结果落盘到项目外），且不做构建集成。本项目所有用例都编进同一个
---   二进制 build-Debug/bin/LearnCPP_Test，gtest 全名（Suite.Test）写在
---   TEST_F 的第一个参数里，用 --gtest_filter 就能精确定位，
---   所以自写反而更短，也不需要任何手工映射。
+--   手动绑定（结果落盘到项目外），且不做构建集成。一个项目的用例全编进同一个
+--   二进制（路径来自项目根的 .nvim.yaml，见 lua/project_config.lua），
+--   gtest 全名（Suite.Test）写在 TEST_F 的第一个参数里，用 --gtest_filter
+--   就能精确定位，所以自写反而更短，也不需要任何手工映射。
 
 local lib = require("neotest.lib")
+local project_config = require("project_config")
 
 local M = {}
 
----@class neotest_cpp.Config
----@field binary string 可执行文件（相对项目根）
----@field build_args string[] 构建命令（在项目根执行）
----@field auto_build boolean 运行前先增量编译（避免跑旧二进制）
----@field extensions string[] 视为测试源码的扩展名
-
----@type neotest_cpp.Config
-M.config = {
-  binary = "build-Debug/bin/LearnCPP_Test",
-  build_args = { "cmake", "--build", "build-Debug", "--target", "LearnCPP_Test" },
-  auto_build = true,
-  extensions = { "cc", "cpp", "cxx" },
-}
+-- 二进制、构建命令这些「跟项目走」的值全部来自项目根的 .nvim.yaml
+-- （project_config.DEFAULTS 里只有 auto_build / extensions；target 没有默认值，
+-- 因为目标名必然因项目而异）。这里只收插件 spec 那一层的全局覆盖，
+-- 优先级低于项目自己的 .nvim.yaml。
+---@type table
+M.opts = {}
 
 -- 覆盖默认配置（可选）：在插件 spec 里写
 --   opts = { adapters = { ["neotest_cpp"] = { auto_build = false } } }
--- LazyVim 的 test extra 会自动调用这个 setup
----@param opts? neotest_cpp.Config
+-- LazyVim 的 test extra 会自动调用这个 setup。
+-- 注意优先级：项目根 .nvim.yaml  >  这里传的 opts  >  project_config.DEFAULTS
+-- （项目文件更具体，所以压过全局；写在这里的键仍会被同名项目的配置盖掉）
+---@param opts? table
 function M.setup(opts)
-  M.config = vim.tbl_deep_extend("force", M.config, opts or {})
+  M.opts = opts or {}
 end
 
 -- neotest 用 name 拼 adapter_id（"%s:%s" % {name, root}），必须有
 M.name = "neotest_cpp"
 
--- 项目根：以 compile_commands.json / CMakeLists.txt 为标志向上查找
-local find_root = lib.files.match_root_pattern("compile_commands.json", "CMakeLists.txt")
+-- 某个项目根下解析好的配置。
+-- 用 project_config 的找根，和 debug.lua 的 <Space>tg 保持同一套定义——
+-- 以前两边各写一份（这边只认 CMake 标志、那边用 cwd），从子目录进来会对不上。
+---@param root string
+---@return project_config.Resolved
+local function cfg(root)
+  return project_config.resolve(root, M.opts)
+end
 
 ---@param path string
 ---@return string|nil
 function M.root(path)
-  return find_root(path)
+  return project_config.find_root(path)
 end
 
 -- TEST_F(Suite, Name) 在 tree-sitter-cpp 里被解析成：
@@ -89,7 +91,11 @@ end
 ---@return boolean
 function M.is_test_file(file_path)
   local ext = file_path:match("%.([%w_]+)$")
-  if not ext or not vim.tbl_contains(M.config.extensions, ext) then
+  if not ext then
+    return false
+  end
+  -- 扩展名清单也按文件所属项目取（.nvim.yaml 的 extensions 可以覆盖）
+  if not vim.tbl_contains(project_config.resolve_for_path(file_path, M.opts).extensions, ext) then
     return false
   end
   -- 只有含 gtest 宏的文件才当作测试文件（同一棵树下也有普通源文件）
@@ -148,10 +154,11 @@ end
 
 -- 同步等一次增量编译（调试路径用），失败时把编译输出通知出来
 ---@param dir string
+---@param build_args string[]
 ---@return boolean
-local function build_sync(dir)
+local function build_sync(dir, build_args)
   local ok, res = pcall(function()
-    return vim.system(M.config.build_args, { cwd = dir, text = true }):wait()
+    return vim.system(build_args, { cwd = dir, text = true }):wait()
   end)
   if not ok or res.code ~= 0 then
     local out = ok and ((res.stderr ~= "" and res.stderr) or res.stdout or "") or tostring(res)
@@ -166,13 +173,21 @@ end
 function M.build_spec(args)
   local position = args.tree:data()
   local dir = M.root(position.path) or vim.uv.cwd()
-  local binary = dir .. "/" .. M.config.binary
+  local c = cfg(dir) -- 本项目的配置：二进制、构建命令、是否自动编译
+  local binary = c.binary
   local filter = build_filter(args.tree)
+
+  if not binary then
+    -- c.problem 里写着「为什么定位不到二进制 + 下一步」，直接给用户看。
+    -- 返回 nil 让 neotest 报错，别拼一条 binary=nil 的命令去跑。
+    lib.notify(c.problem or "定位不到测试二进制", vim.log.levels.ERROR)
+    return nil
+  end
 
   if args.strategy == "dap" then
     -- 调试：program 必须就是二进制本身，不能套一层 shell，否则 dap 会去调 bash。
     -- 所以这里同步编译，保证调试的是最新代码。
-    if M.config.auto_build and not build_sync(dir) then
+    if c.auto_build and not build_sync(dir, c.build_args) then
       return nil -- 编译失败：交给 neotest 报错，别拿旧二进制去调试
     end
     return {
@@ -193,10 +208,10 @@ function M.build_spec(args)
 
   local command = filter and { binary, "--gtest_filter=" .. filter } or { binary }
 
-  if M.config.auto_build then
+  if c.auto_build then
     -- 先增量编译再跑，两者输出都进 neotest 的 output 面板：
     -- 编译不过时你看到的是编译错误，而不是一个过期的二进制在跑
-    local build = table.concat(vim.tbl_map(vim.fn.shellescape, M.config.build_args), " ")
+    local build = c.build_hint
     local run = table.concat(vim.tbl_map(vim.fn.shellescape, command), " ")
     command = { "bash", "-c", ("cd %s && %s && exec %s"):format(vim.fn.shellescape(dir), build, run) }
   end
