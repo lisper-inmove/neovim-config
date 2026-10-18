@@ -12,6 +12,8 @@
 | Python / pytest | `<Space>tt` / `<Space>tr` | `<Space>td` | neotest-python + debugpy |
 | C++ / gtest | `<Space>tt` / `<Space>tr`（跑前自动编译） | `<Space>tg`（`<Space>td` 走同一套 codelldb 配置，未实测） | neotest_cpp（自写）+ codelldb |
 
+性能分析（仅 C++ / gtest）：`<Space>tp` 光标所在用例，`<Space>tP` 从列表选。
+
 ---
 
 ## 快捷键
@@ -26,6 +28,8 @@
 | `<Space>tl` | 重跑上一次运行 |
 | `<Space>td` | **调试光标所在用例**（Python → debugpy，C++ → codelldb） |
 | `<Space>tg` | **选择并调试 gtest 用例**（C++，见下） |
+| `<Space>tp` | **perf 光标所在用例**（C++，采样后打开 perf report） |
+| `<Space>tP` | **选择并 perf gtest 用例**（C++，见下） |
 | `<Space>ts` | 开关测试摘要面板（列出全部用例与状态） |
 | `<Space>to` | 查看最近一次运行的输出（含失败堆栈） |
 | `<Space>tO` | 开关输出面板（常驻，边改边看） |
@@ -60,6 +64,7 @@
 | Python 项目 | 根目录有 `pyproject.toml`；测试文件命名 `test_*.py` 或 `*_test.py`；根目录有 `.venv/`（`uv sync` 生成） |
 | C++ 项目 | 项目根有 `.nvim.yaml`，里面写一行 `target: <相对项目根的二进制路径>`（也可以只写目标名）；用 CMake 配置过一次 Debug 构建（构建目录里有 `CMakeCache.txt`）。项目根 = 有 `.nvim.yaml` / `compile_commands.json` / `CMakeLists.txt` 的目录 |
 | treesitter | 需要 python parser 和 cpp parser（用例靠 tree-sitter 解析） |
+| perf | 系统安装 `perf`（linux-tools），且 `kernel.perf_event_paranoid <= 2`；仅 `<Space>tp` / `<Space>tP` 需要 |
 
 `lazyvim.plugins.extras.test.core` 只提供 neotest 骨架和 `<Space>t*` 键位，
 **`adapters` 默认为空**——真正让测试跑起来的语言适配器必须自己配。
@@ -151,6 +156,37 @@ python 适配器，从而覆盖 `nvim-dap-python` 注册的那个。`python.lua`
 
 不在测试列表场景下，也可以用 `:lua require("dap").continue()` 走
 `dap.configurations.cpp` 里注册的两个配置（全部 / 手动 filter）。
+
+### C++ / gtest —— 性能分析（`<Space>tp` / `<Space>tP`）
+
+和运行/调试共用同一套项目配置（二进制、构建命令、`auto_build`），实现见
+`lua/perf_cpp.lua`：
+
+1. 定位不到二进制时直接显示原因和构建命令，不会往下跑。
+2. `auto_build` 打开时先同步增量编译，编译失败就停（避免 profile 旧代码）。
+3. 后台采样 10 秒，不阻塞编辑器：
+
+   ```bash
+   perf record -F 999 -g --call-graph dwarf -o /tmp/nvim-perf/<用例>.data -- \
+     timeout 10s <二进制> --gtest_filter=<用例> --gtest_repeat=-1 --gtest_brief=1
+   ```
+
+   单元测试往往几十微秒就结束，跑一次采不到样本；`--gtest_repeat=-1`
+   一直重复，`timeout` 把总时长截在 10 秒——快的用例攒够样本，
+   慢的用例也不会卡住。gtest 的 stdout 直接丢弃
+   （`--gtest_brief=1` 每轮仍会打印两行）。
+4. 采样完成后在浮窗终端里打开 `perf report -i <数据文件>`：
+   回车展开调用链、`a` 看行级热点、`q` 退出。
+
+`<Space>tp` 用光标所在（或最近的）`TEST_F` 用例；光标不在测试里时退回
+`<Space>tP` 的选择器。选择器里还有「全部」和「手动输入过滤器」。
+
+⚠️ Debug 构建是 `-O0`，热点会偏向调试版的访问器/内联链，不代表优化后的性能。
+要看真实数据，把 `.nvim.yaml` 的 `target` 和 `build_dir` 都指向 RelWithDebInfo
+构建（只改 `target` 的话，自动编译仍会去构建 Debug 目录）。
+
+⚠️ 虚拟机里通常没有硬件 PMU：`perf stat -e cycles` 等显示 `<not supported>`，
+但本流程用的 `task-clock` 软件事件和调用链采样正常（详见常见问题）。
 
 ---
 
@@ -408,6 +444,30 @@ require("dap-python").setup("debugpy-adapter")
 二进制存在但 `--gtest_list_tests` 没输出。手动验证（在项目根下）：
 ```bash
 ./build-Debug/bin/LearnCPP_Test --gtest_list_tests
+```
+
+**Q（性能）: `<Space>tp` 报 "perf 采样失败：Access to performance monitoring..."？**
+非特权用户被 `perf_event_paranoid` 挡住了。设为 2 即可做用户态采样：
+```bash
+echo 'kernel.perf_event_paranoid=2' | sudo tee /etc/sysctl.d/99-perf-profiler.conf
+sudo sysctl --system
+```
+
+**Q（性能）: `perf` 报 "perf not found for kernel ..."？**
+`/usr/bin/perf` 是按内核版本分发的脚本，运行中的内核和已安装的
+linux-tools 版本对不上。重启进入新内核，或直接调用已安装版本的二进制
+（`/usr/lib/linux-tools/<版本>/perf`）；也可以把它链接到 PATH 前面：
+```bash
+sudo ln -sf /usr/lib/linux-tools/$(ls /usr/lib/linux-tools | sort -V | tail -1)/perf /usr/local/bin/perf
+```
+
+**Q（性能）: `perf stat -e cycles` 显示 `<not supported>`？**
+虚拟机通常没有暴露硬件 PMU，`cycles` / `instructions` / `cache-misses`
+都不可用。调用链采样用的是 `task-clock` 软件事件，不受影响；要看计数器
+就显式指定软件事件：
+```bash
+perf stat -e task-clock,context-switches,page-faults -r 3 -- \
+  ./build-Debug/bin/LearnCPP_Test --gtest_filter=Tester.WEP_01_Substring_Sort
 ```
 
 **Q（调试）: 有 codelldb 进程残留？**
