@@ -53,20 +53,22 @@ function M.root(path)
   return project_config.find_root(path)
 end
 
--- TEST_F(Suite, Name) 在 tree-sitter-cpp 里被解析成：
+-- TEST / TEST_F(Suite, Name) 在 tree-sitter-cpp 里被解析成同一个形状：
 --   function_definition
 --     function_declarator
---       identifier            "TEST_F"
+--       identifier            "TEST_F" / "TEST"
 --       parameter_list
 --         parameter_declaration  Suite
 --         parameter_declaration  Name
 -- （实测确认；不是 call_expression，网上常见的 call_expression 查询在这里 0 匹配）
 -- 参数用 (_) 通配，避免跟 tree-sitter-cpp 版本走。
+-- 宏名只认 TEST / TEST_F：两种宏展开后 gtest 全名都是 Suite.Name，
+-- --gtest_filter 直接可用。TEST_P 不用（参数化用例的语义不同）。
 M.query = [[
   (function_definition
     declarator: (function_declarator
       declarator: (identifier) @_macro
-      (#eq? @_macro "TEST_F")
+      (#match? @_macro "^(TEST|TEST_F)$")
       parameters: (parameter_list
         (_) @suite.name
         (_) @test.name))) @test.definition
@@ -103,9 +105,10 @@ function M.is_test_file(file_path)
   if not vim.tbl_contains(project_config.extensions_for_path(file_path, M.opts), ext) then
     return false
   end
-  -- 只有含 gtest 宏的文件才当作测试文件（同一棵树下也有普通源文件）
+  -- 只有含 gtest 宏的文件才当作测试文件（同一棵树下也有普通源文件）。
+  -- 认 TEST( / TEST_F( 两种：两种都顶一个 gtest 用例，全名都是 Suite.Name
   local content = read_file(file_path)
-  return content ~= nil and content:find("TEST_F%s*%(") ~= nil
+  return content ~= nil and content:find("TEST_?F?%s*%(") ~= nil
 end
 
 ---@param file_path string

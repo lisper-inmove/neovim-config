@@ -41,8 +41,10 @@ local SKIP_DIRS = {
   ["venv"] = true,
 }
 
--- 从项目根往下最多找几层（够 build/、build-Debug/、out/Debug/ 这些常见布局）
-local BUILD_DIR_MAX_DEPTH = 3
+-- 从项目根往下最多找几层：build/、build-Debug/、out/Debug/ 都只到 3 层，但
+-- out/build/linux-debug/（AFSS 的 linux-debug-build.sh 用的布局）要多一层，要 4。
+-- 再深就不常见了，还拖慢扫描。
+local BUILD_DIR_MAX_DEPTH = 4
 
 ---@class project_config.Defaults
 ---@field target? string 二进制相对项目根的路径；或只写目标名（= 二进制文件名）
