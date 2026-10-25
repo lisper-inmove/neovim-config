@@ -24,6 +24,11 @@ vim.api.nvim_create_autocmd("CursorHold", {
     end
     vim.diagnostic.open_float({
       scope = "line",
+      -- 浮窗默认 focusable=true，且同 focus_id 的浮窗已存在时 open_float 会把焦点
+      -- 切进去。第一次 CursorHold 弹出浮窗后，按 Esc 会让 CursorHold 再次触发，
+      -- 焦点就被送进浮窗。两个都关掉，保证永远不进入这个临时窗。
+      focus = false,
+      focusable = false,
       close_events = { "CursorMoved", "CursorMovedI", "InsertEnter", "BufLeave" },
     })
   end,
