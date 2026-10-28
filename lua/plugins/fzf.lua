@@ -9,9 +9,20 @@ return {
   -- Standalone Ag (the_silver_searcher) search via fzf-lua, using
   -- fzf-lua's `cmd` override. Output format `path:line:col:match`
   -- (ag --column) matches what fzf-lua's grep parse expects, so no
-  -- other option changes are needed. Press <leader>sA to search.
+  -- other option changes are needed. Search with <leader>sA or :Ag.
   {
     "ibhagwan/fzf-lua",
+    init = function()
+      -- :Ag user command. `init` (not `config`) so we don't override
+      -- LazyVim's fzf-lua setup; load the plugin explicitly on demand.
+      vim.api.nvim_create_user_command("Ag", function()
+        require("lazy").load({ plugins = "fzf-lua" })
+        require("fzf-lua").grep({
+          cmd = "ag --column --nogroup --color --smart-case",
+          input_prompt = "Ag> ",
+        })
+      end, { desc = "Grep with Ag (Root Dir)" })
+    end,
     keys = {
       {
         "<leader>sA",
